@@ -1,0 +1,417 @@
+// Bravio — Complete Prisma Schema
+// All 17 tables matching docs/schema.sql specification
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  GUEST
+  FREE_USER
+  PREMIUM_USER
+  SYSTEM_ADMIN
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  TRIALING
+}
+
+enum ProjectStatus {
+  PENDING
+  GENERATING
+  COMPLETED
+  FAILED
+}
+
+enum LogoFormat {
+  SVG
+  PNG
+  JPG
+}
+
+enum CheckStatus {
+  AVAILABLE
+  TAKEN
+  ERROR
+  UNKNOWN
+}
+
+enum MilestoneStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+// ============================================================
+// 1. USERS
+// ============================================================
+
+model User {
+  id        String   @id @default(uuid())
+  clerkId   String   @unique @map("clerk_id")
+  email     String   @unique
+  name      String?
+  role      UserRole @default(FREE_USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  subscription Subscription?
+  projects     Project[]
+  auditLogs    AuditLog[]
+
+  @@index([clerkId])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================================
+// 2. SUBSCRIPTIONS
+// ============================================================
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  userId               String             @unique @map("user_id")
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id")
+  stripeCustomerId     String             @map("stripe_customer_id")
+  status               SubscriptionStatus @default(TRIALING)
+  priceId              String             @map("price_id")
+  periodStart          DateTime           @map("period_start")
+  periodEnd            DateTime           @map("period_end")
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([stripeSubscriptionId])
+  @@map("subscriptions")
+}
+
+// ============================================================
+// 3. PROJECTS
+// ============================================================
+
+model Project {
+  id             String        @id @default(uuid())
+  userId         String        @map("user_id")
+  name           String
+  originalPrompt String        @map("original_prompt")
+  status         ProjectStatus @default(PENDING)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startupGenerations  StartupGeneration[]
+  brandAssets         BrandAsset?
+  logo                Logo?
+  landingPage         LandingPage?
+  pricingModels       PricingModel[]
+  marketingAssets     MarketingAsset[]
+  pitchDeck           PitchDeck?
+  businessCards       BusinessCard[]
+  mockups             Mockup[]
+  domainChecks        DomainCheck[]
+  socialChecks        SocialCheck[]
+  competitorAnalysis  CompetitorAnalysis[]
+  roadmaps            Roadmap[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("projects")
+}
+
+// ============================================================
+// 4. STARTUP_GENERATIONS (Execution Logging)
+// ============================================================
+
+model StartupGeneration {
+  id                 String    @id @default(uuid())
+  projectId          String    @map("project_id")
+  progressPercentage Int       @default(0) @map("progress_percentage")
+  currentStep        String?   @map("current_step")
+  errorMessage       String?   @map("error_message")
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("startup_generations")
+}
+
+// ============================================================
+// 5. BRAND_ASSETS
+// ============================================================
+
+model BrandAsset {
+  id                 String   @id @default(uuid())
+  projectId          String   @unique @map("project_id")
+  taglineSuggestions Json     @map("tagline_suggestions")
+  primaryColor       String   @map("primary_color")
+  secondaryColor     String   @map("secondary_color")
+  accentColor        String   @map("accent_color")
+  backgroundColor    String   @map("background_color")
+  headingFont        String   @map("heading_font")
+  bodyFont           String   @map("body_font")
+  brandVoiceGuide    String   @map("brand_voice_guide")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("brand_assets")
+}
+
+// ============================================================
+// 6. LOGOS
+// ============================================================
+
+model Logo {
+  id          String     @id @default(uuid())
+  projectId   String     @unique @map("project_id")
+  dallePrompt String     @map("dalle_prompt")
+  s3ImageUrl  String     @map("s3_image_url")
+  logoFormat  LogoFormat @default(PNG) @map("logo_format")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("logos")
+}
+
+// ============================================================
+// 7. LANDING_PAGES
+// ============================================================
+
+model LandingPage {
+  id               String   @id @default(uuid())
+  projectId        String   @unique @map("project_id")
+  seoTitle         String   @map("seo_title")
+  seoDescription   String   @map("seo_description")
+  heroTitle        String   @map("hero_title")
+  heroSubtitle     String   @map("hero_subtitle")
+  ctaText          String   @map("cta_text")
+  featuresJson     Json     @map("features_json")
+  faqJson          Json     @map("faq_json")
+  socialProofJson  Json?    @map("social_proof_json")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("landing_pages")
+}
+
+// ============================================================
+// 8. PRICING_MODELS
+// ============================================================
+
+model PricingModel {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  tierName         String   @map("tier_name")
+  priceAmount      Decimal  @map("price_amount")
+  billingPeriod    String   @default("monthly") @map("billing_period")
+  featuresIncluded Json     @map("features_included")
+  isRecommended    Boolean  @default(false) @map("is_recommended")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("pricing_models")
+}
+
+// ============================================================
+// 9. MARKETING_ASSETS
+// ============================================================
+
+model MarketingAsset {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  channel        String
+  headline       String
+  bodyContent    String   @map("body_content")
+  callToAction   String   @map("call_to_action")
+  targetKeywords Json?    @map("target_keywords")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("marketing_assets")
+}
+
+// ============================================================
+// 10. PITCH_DECKS
+// ============================================================
+
+model PitchDeck {
+  id        String   @id @default(uuid())
+  projectId String   @unique @map("project_id")
+  slidesJson Json    @map("slides_json")
+  s3PdfUrl  String?  @map("s3_pdf_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("pitch_decks")
+}
+
+// ============================================================
+// 11. BUSINESS_CARDS
+// ============================================================
+
+model BusinessCard {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  cardholderName  String   @map("cardholder_name")
+  cardholderTitle String   @map("cardholder_title")
+  contactEmail    String   @map("contact_email")
+  contactPhone    String?  @map("contact_phone")
+  websiteUrl      String?  @map("website_url")
+  layoutStyle     String   @default("minimalist") @map("layout_style")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("business_cards")
+}
+
+// ============================================================
+// 12. MOCKUPS
+// ============================================================
+
+model Mockup {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  deviceType        String   @map("device_type")
+  descriptionPrompt String   @map("description_prompt")
+  s3MockupUrl       String   @map("s3_mockup_url")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("mockups")
+}
+
+// ============================================================
+// 13. DOMAIN_CHECKS
+// ============================================================
+
+model DomainCheck {
+  id         String      @id @default(uuid())
+  projectId  String      @map("project_id")
+  domainName String      @map("domain_name")
+  tld        String
+  status     CheckStatus @default(UNKNOWN)
+  whoisRaw   String?     @map("whois_raw")
+  checkedAt  DateTime    @default(now()) @map("checked_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("domain_checks")
+}
+
+// ============================================================
+// 14. SOCIAL_CHECKS
+// ============================================================
+
+model SocialCheck {
+  id        String      @id @default(uuid())
+  projectId String      @map("project_id")
+  platform  String
+  username  String
+  status    CheckStatus @default(UNKNOWN)
+  checkedAt DateTime    @default(now()) @map("checked_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("social_checks")
+}
+
+// ============================================================
+// 15. COMPETITOR_ANALYSIS
+// ============================================================
+
+model CompetitorAnalysis {
+  id                   String   @id @default(uuid())
+  projectId            String   @map("project_id")
+  competitorName       String   @map("competitor_name")
+  strengths            String
+  weaknesses           String
+  estimatedMarketShare String?  @map("estimated_market_share")
+  websiteUrl           String?  @map("website_url")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("competitor_analysis")
+}
+
+// ============================================================
+// 16. ROADMAPS
+// ============================================================
+
+model Roadmap {
+  id                   String          @id @default(uuid())
+  projectId            String          @map("project_id")
+  milestoneTitle       String          @map("milestone_title")
+  milestoneDescription String?         @map("milestone_description")
+  timeframe            String
+  status               MilestoneStatus @default(TODO)
+  priorityLevel        Int             @default(1) @map("priority_level")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("roadmaps")
+}
+
+// ============================================================
+// 17. AUDIT_LOGS
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  actionType String   @map("action_type")
+  ipAddress  String   @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  payload    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([actionType])
+  @@map("audit_logs")
+}
